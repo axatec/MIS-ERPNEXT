@@ -200,7 +200,7 @@ def get_data():
 			"color": "#fd784f",
 			"icon": "octicon octicon-calendar",
 			"label": _("Course Schedule"),
-			"link": "Calendar/Course Schedule",
+			"link": "List/Course Schedule/Calendar",
 			"_doctype": "Course Schedule",
 			"type": "list",
 			"hidden": 1
@@ -336,7 +336,7 @@ def get_data():
 			"color": "#009248",
 			"icon": "/assets/erpnext/images/hub_logo.svg",
 			"type": "page",
-			"link": "Hub/Home",
+			"link": "Hub/Item",
 			"label": _("Hub")
 		},
 		{

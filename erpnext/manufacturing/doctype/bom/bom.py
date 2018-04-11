@@ -51,7 +51,6 @@ class BOM(WebsiteGenerator):
 		self.validate_currency()
 		self.set_conversion_rate()
 		self.validate_uom_is_interger()
-		self.update_stock_qty()
 		self.set_bom_material_details()
 		self.validate_materials()
 		self.validate_operations()
@@ -251,14 +250,12 @@ class BOM(WebsiteGenerator):
 			set_default(self, "item")
 			item = frappe.get_doc("Item", self.item)
 			if item.default_bom != self.name:
-				item.default_bom = self.name
-				item.save(ignore_permissions = True)
+				frappe.db.set_value('Item', self.item, 'default_bom', self.name)
 		else:
 			frappe.db.set(self, "is_default", 0)
 			item = frappe.get_doc("Item", self.item)
 			if item.default_bom == self.name:
-				item.default_bom = None
-				item.save(ignore_permissions = True)
+				frappe.db.set_value('Item', self.item, 'default_bom', None)
 
 	def clear_operations(self):
 		if not self.with_operations:
@@ -294,6 +291,8 @@ class BOM(WebsiteGenerator):
 			if not m.uom and m.stock_uom:
 				m.uom = m.stock_uom
 				m.qty = m.stock_qty
+
+			m.db_update()
 
 	def validate_uom_is_interger(self):
 		from erpnext.utilities.transaction_base import validate_uom_is_integer
@@ -337,19 +336,23 @@ class BOM(WebsiteGenerator):
 
 	def check_recursion(self):
 		""" Check whether recursion occurs in any bom"""
+		bom_list = self.traverse_tree()
+		bom_nos = frappe.get_all('BOM Item', fields=["bom_no"],
+			filters={'parent': ('in', bom_list), 'parenttype': 'BOM'})
 
-		check_list = [['parent', 'bom_no', 'parent'], ['bom_no', 'parent', 'child']]
-		for d in check_list:
-			bom_list, count = [self.name], 0
-			while (len(bom_list) > count ):
-				boms = frappe.db.sql(" select %s from `tabBOM Item` where %s = %s and parenttype='BOM'" %
-					(d[0], d[1], '%s'), cstr(bom_list[count]))
-				count = count + 1
-				for b in boms:
-					if b[0] == self.name:
-						frappe.throw(_("BOM recursion: {0} cannot be parent or child of {2}").format(b[0], self.name))
-					if b[0]:
-						bom_list.append(b[0])
+		raise_exception = False
+		if bom_nos and self.name in [d.bom_no for d in bom_nos]:
+			raise_exception = True
+
+		if not raise_exception:
+			bom_nos = frappe.get_all('BOM Item', fields=["parent"],
+				filters={'bom_no': self.name, 'parenttype': 'BOM'})
+
+			if self.name in [d.parent for d in bom_nos]:
+				raise_exception = True
+
+		if raise_exception:
+			frappe.throw(_("BOM recursion: {0} cannot be parent or child of {2}").format(self.name, self.name))
 
 	def update_cost_and_exploded_items(self, bom_list=[]):
 		bom_list = self.traverse_tree(bom_list)
@@ -540,6 +543,7 @@ def get_bom_items_as_dict(bom, company, qty=1, fetch_exploded=1, fetch_scrap_ite
 				item.description,
 				item.image,
 				item.stock_uom,
+				item.allow_alternative_item,
 				item.default_warehouse,
 				item.expense_account as expense_account,
 				item.buying_cost_center as cost_center
@@ -570,7 +574,7 @@ def get_bom_items_as_dict(bom, company, qty=1, fetch_exploded=1, fetch_scrap_ite
 		items = frappe.db.sql(query, { "qty": qty, "bom": bom }, as_dict=True)
 
 	for item in items:
-		if item_dict.has_key(item.item_code):
+		if item.item_code in item_dict:
 			item_dict[item.item_code]["qty"] += flt(item.qty)
 		else:
 			item_dict[item.item_code] = item
@@ -601,6 +605,9 @@ def validate_bom_no(item, bom_no):
 	if item:
 		rm_item_exists = False
 		for d in bom.items:
+			if (d.item_code.lower() == item.lower()):
+				rm_item_exists = True
+		for d in bom.scrap_items:
 			if (d.item_code.lower() == item.lower()):
 				rm_item_exists = True
 		if bom.item.lower() == item.lower() or \
